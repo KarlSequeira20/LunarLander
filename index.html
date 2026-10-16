@@ -1,0 +1,677 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Teaching a rocket to land: reward shaping with PPO</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link
+        href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;700;800&family=Source+Serif+4:ital,wght@0,400;0,600;1,400&display=swap"
+        rel="stylesheet">
+    <style>
+        :root {
+            --bg: #E8EAED;
+            --paper: #F6F7F8;
+            --ink: #1B2230;
+            --muted: #56607A;
+            --line: #C9CED8;
+            --blue: #2F5BFF;
+            --green: #23825F;
+            --red: #C23B35;
+            --head: 'Bricolage Grotesque', 'Helvetica Neue', Arial, sans-serif;
+            --body: 'Source Serif 4', Georgia, 'Times New Roman', serif;
+        }
+
+        * {
+            box-sizing: border-box
+        }
+
+        html {
+            scroll-behavior: smooth
+        }
+
+        body {
+            margin: 0;
+            background: var(--bg);
+            color: var(--ink);
+            font: 18px/1.65 var(--body)
+        }
+
+        a {
+            color: var(--blue)
+        }
+
+        :focus-visible {
+            outline: 3px solid var(--blue);
+            outline-offset: 3px
+        }
+
+        .wrap {
+            max-width: 1040px;
+            margin: 0 auto;
+            padding: 0 24px
+        }
+
+        .narrow {
+            max-width: 660px
+        }
+
+        nav {
+            position: sticky;
+            top: 0;
+            background: var(--bg);
+            border-bottom: 1px solid var(--line);
+            z-index: 5
+        }
+
+        nav .wrap {
+            display: flex;
+            gap: 22px;
+            align-items: center;
+            height: 52px;
+            font: 600 15px var(--head);
+            overflow-x: auto;
+            white-space: nowrap
+        }
+
+        nav b {
+            margin-right: auto;
+            font-weight: 800
+        }
+
+        nav a {
+            color: var(--ink);
+            text-decoration: none
+        }
+
+        nav a:hover {
+            color: var(--blue)
+        }
+
+        h1,
+        h2,
+        h3 {
+            font-family: var(--head);
+            line-height: 1.08;
+            margin: 0
+        }
+
+        h1 {
+            font-size: clamp(40px, 7vw, 76px);
+            font-weight: 800;
+            letter-spacing: -.03em;
+            max-width: 15ch
+        }
+
+        h2 {
+            font-size: clamp(28px, 4vw, 40px);
+            font-weight: 700;
+            letter-spacing: -.02em;
+            margin-bottom: 18px
+        }
+
+        h3 {
+            font-size: 20px;
+            font-weight: 700;
+            margin-bottom: 6px
+        }
+
+        section {
+            padding: 72px 0;
+            border-top: 1px solid var(--line)
+        }
+
+        .hero {
+            padding: 64px 0 48px;
+            border: 0
+        }
+
+        .lede {
+            font-size: 22px;
+            max-width: 36ch;
+            margin: 22px 0 0;
+            color: var(--muted)
+        }
+
+        .meta {
+            font: 500 15px var(--head);
+            color: var(--muted);
+            margin-top: 18px
+        }
+
+        /* the landing-record chart */
+        .chart {
+            background: var(--paper);
+            border: 1px solid var(--line);
+            padding: 24px 24px 16px;
+            margin-top: 40px
+        }
+
+        .chart-top {
+            display: flex;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 8px;
+            font: 600 15px var(--head)
+        }
+
+        .bars {
+            position: relative;
+            display: flex;
+            align-items: flex-end;
+            gap: 6px;
+            height: 240px;
+            margin: 18px 0 8px;
+            border-bottom: 2px solid var(--ink)
+        }
+
+        .zero {
+            position: absolute;
+            left: 0;
+            right: 0;
+            border-top: 1px dashed var(--muted)
+        }
+
+        .bar {
+            flex: 1;
+            position: relative;
+            min-width: 0;
+            height: 100%
+        }
+
+        .bar i {
+            position: absolute;
+            left: 0;
+            right: 0;
+            display: block
+        }
+
+        .bar.ok i {
+            background: var(--green)
+        }
+
+        .bar.mid i {
+            background: #C9902B
+        }
+
+        .bar.bad i {
+            background: var(--red)
+        }
+
+        .bar:hover i {
+            filter: brightness(1.15)
+        }
+
+        .bar span {
+            position: absolute;
+            left: 50%;
+            transform: translateX(-50%);
+            top: 4px;
+            font: 600 12px var(--head);
+            background: var(--ink);
+            color: #fff;
+            padding: 2px 6px;
+            white-space: nowrap;
+            display: none;
+            z-index: 2
+        }
+
+        .bar:hover span,
+        .bar:focus span {
+            display: block
+        }
+
+        .legend {
+            display: flex;
+            gap: 18px;
+            flex-wrap: wrap;
+            font: 500 14px var(--head);
+            color: var(--muted)
+        }
+
+        .legend s {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            margin-right: 6px;
+            vertical-align: -1px;
+            text-decoration: none
+        }
+
+        /* stats */
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 0;
+            margin-top: 28px;
+            border: 1px solid var(--line);
+            background: var(--paper)
+        }
+
+        .stat {
+            padding: 22px;
+            border-right: 1px solid var(--line)
+        }
+
+        .stat:last-child {
+            border: 0
+        }
+
+        .stat strong {
+            display: block;
+            font: 800 40px var(--head);
+            letter-spacing: -.02em
+        }
+
+        .stat small {
+            font: 500 14px var(--head);
+            color: var(--muted)
+        }
+
+        .neg strong {
+            color: var(--red)
+        }
+
+        .pos strong {
+            color: var(--green)
+        }
+
+        /* tables */
+        table {
+            border-collapse: collapse;
+            width: 100%;
+            background: var(--paper);
+            font: 500 16px var(--head);
+            margin: 18px 0
+        }
+
+        th,
+        td {
+            text-align: left;
+            padding: 10px 14px;
+            border: 1px solid var(--line)
+        }
+
+        th {
+            background: var(--bg)
+        }
+
+        .scroll {
+            overflow-x: auto
+        }
+
+        /* two column text */
+        .cols {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 40px
+        }
+
+        @media(max-width:760px) {
+            .cols {
+                grid-template-columns: 1fr
+            }
+
+            .stat {
+                border-right: 0;
+                border-bottom: 1px solid var(--line)
+            }
+        }
+
+        code {
+            font: 500 .85em ui-monospace, Menlo, monospace;
+            background: var(--paper);
+            padding: 1px 5px;
+            border: 1px solid var(--line)
+        }
+
+        pre {
+            background: var(--ink);
+            color: #E8EAED;
+            padding: 18px;
+            overflow-x: auto;
+            font: 500 14px/1.6 ui-monospace, Menlo, monospace;
+            margin: 18px 0
+        }
+
+        pre em {
+            color: #8FB0FF;
+            font-style: normal
+        }
+
+        /* videos */
+        .vids {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
+            gap: 20px;
+            margin-top: 24px
+        }
+
+        figure {
+            margin: 0;
+            background: var(--paper);
+            border: 1px solid var(--line)
+        }
+
+        figure video {
+            display: block;
+            width: 100%;
+            aspect-ratio: 3/2;
+            background: var(--ink)
+        }
+
+        figcaption {
+            padding: 12px 14px;
+            font: 500 15px/1.45 var(--head)
+        }
+
+        figcaption em {
+            display: block;
+            color: var(--muted);
+            font-style: normal;
+            font-weight: 400;
+            margin-top: 2px
+        }
+
+        .missing {
+            display: none;
+            padding: 14px;
+            font: 500 14px var(--head);
+            color: var(--red);
+            border-top: 1px solid var(--line)
+        }
+
+        .todo {
+            border-left: 4px solid #C9902B;
+            background: var(--paper);
+            padding: 14px 18px;
+            font: 500 16px/1.5 var(--head);
+            margin: 20px 0
+        }
+
+        .mess li {
+            margin-bottom: 8px
+        }
+
+        footer {
+            padding: 40px 0 64px;
+            border-top: 1px solid var(--line);
+            font: 500 15px var(--head);
+            color: var(--muted)
+        }
+    </style>
+</head>
+
+<body>
+
+    <nav>
+        <div class="wrap">
+            <b>Lunar Lander RL</b>
+            <a href="#idea">Idea</a><a href="#how">How it works</a><a href="#results">Results</a>
+            <a href="#demos">Demos</a><a href="#hacking">Reward hacking</a><a href="#notes">Notes</a>
+        </div>
+    </nav>
+
+    <header class="hero">
+        <div class="wrap">
+            <h1>Teaching a rocket to land by choosing what to reward</h1>
+            <p class="lede">I trained an AI to land a small rocket without crashing, then changed the scoring to see how
+                it breaks.</p>
+            <p class="meta">Python, Gymnasium (LunarLander-v3), Stable-Baselines3, PPO. Built on a MacBook, no GPU.</p>
+
+            <div class="chart" aria-label="Bar chart of 20 evaluation landings">
+                <div class="chart-top"><span>20 test landings, trained PPO model (1M steps)</span><span id="avg"></span>
+                </div>
+                <div class="bars" id="bars" role="img" aria-label="Episode rewards from -43 to 273"></div>
+                <div class="legend">
+                    <span><s style="background:var(--green)"></s>Landed well (180+)</span>
+                    <span><s style="background:#C9902B"></s>Rough landing</span>
+                    <span><s style="background:var(--red)"></s>Crashed</span>
+                    <span>Hover a bar for its score</span>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <section id="idea">
+        <div class="wrap narrow">
+            <h2>The idea</h2>
+            <p>In reinforcement learning you don't tell the AI how to do the task. You give it a score and let it try
+                thousands of times. It keeps whatever earned points and drops whatever lost them.</p>
+            <p>That makes the scoring rule the real design decision. Change how points are awarded and you change what
+                the AI learns. This is called <strong>reward shaping</strong>, and it is what this project is about: get
+                a working lander, write my own reward, break it on purpose, then fix it.</p>
+        </div>
+    </section>
+
+    <section id="how">
+        <div class="wrap">
+            <h2>How it works</h2>
+            <div class="cols">
+                <div>
+                    <h3>What the AI sees</h3>
+                    <p>Eight numbers every frame (50 frames a second). It never sees the picture.</p>
+                    <div class="scroll">
+                        <table>
+                            <tr>
+                                <th>Number</th>
+                                <th>Meaning</th>
+                            </tr>
+                            <tr>
+                                <td>1, 2</td>
+                                <td>Left/right and height above the pad</td>
+                            </tr>
+                            <tr>
+                                <td>3, 4</td>
+                                <td>Sideways and vertical speed</td>
+                            </tr>
+                            <tr>
+                                <td>5, 6</td>
+                                <td>Tilt and spin</td>
+                            </tr>
+                            <tr>
+                                <td>7, 8</td>
+                                <td>Left and right leg touching ground</td>
+                            </tr>
+                        </table>
+                    </div>
+                </div>
+                <div>
+                    <h3>What it can do</h3>
+                    <p>Four choices per frame: nothing, left engine, main engine, right engine.</p>
+                    <h3 style="margin-top:22px">What it learns with</h3>
+                    <p>A small neural network (two layers of 64 units) trained with <strong>PPO</strong>, which nudges
+                        the network toward choices that scored more, in small steps so one lucky run can't wreck what it
+                        has learned.</p>
+                </div>
+            </div>
+            <h3 style="margin-top:36px">How each frame is scored</h3>
+            <p class="narrow">Each frame the game computes a "how good is this position" number: closer to the pad,
+                slower, more upright and legs down all score higher. The reward is how much that number improved since
+                the last frame, minus a small fuel cost (0.3 for the main engine, 0.03 for a side engine). Landing
+                safely adds +100, crashing subtracts 100.</p>
+        </div>
+    </section>
+
+    <section id="results">
+        <div class="wrap">
+            <h2>Results</h2>
+            <p class="narrow">I scored every model on 50 fresh landings with exploration off and my reward wrapper off,
+                so the score is the plain game score. 200 counts as solved.</p>
+            <div class="stats">
+                <div class="stat neg"><strong>-260</strong><small>Random agent</small></div>
+                <div class="stat"><strong>143</strong><small>PPO baseline, average of 50 landings</small></div>
+                <div class="stat pos"><strong>196</strong><small>With a 0.1 per frame time fee</small></div>
+                <div class="stat neg"><strong>64%</strong><small>Episodes that hovered after the +1 per frame
+                        bonus</small></div>
+            </div>
+            <div class="narrow" style="margin-top:28px">
+                <p>The plain time fee was the best result in my runs: 37 of 50 landings scored 200 or more, against 18
+                    of 50 for the baseline. The +1 per frame bonus collapsed the real score to -42 and made 32 of 50
+                    episodes run to the 1,000 frame limit without landing. The improvement-based fix brought hovering
+                    back down to 2 of 50 and the score back to 178. It did not beat the plain time fee, and the gap
+                    between those two is within the noise of a single training run.</p>
+                <p>Each version is one training run, and a 50-landing average still moves by about 15 points between
+                    evaluations, so read the ordering as evidence, not proof. The collapse caused by the hack is far
+                    larger than that noise.</p>
+            </div>
+            <div class="scroll">
+                <table>
+                    <tr>
+                        <th>Model</th>
+                        <th>Mean score</th>
+                        <th>Solved (200+)</th>
+                        <th>Crashes</th>
+                        <th>Timeouts</th>
+                    </tr>
+                    <tr>
+                        <td>Random (3 episodes)</td>
+                        <td>-260</td>
+                        <td>0 / 3</td>
+                        <td>3 / 3</td>
+                        <td>0</td>
+                    </tr>
+                    <tr>
+                        <td>PPO baseline, 1M steps</td>
+                        <td>142.5</td>
+                        <td>18 / 50</td>
+                        <td>7</td>
+                        <td>2</td>
+                    </tr>
+                    <tr>
+                        <td>Baseline + 500k steps (20 episodes)</td>
+                        <td>165.6</td>
+                        <td>n/a</td>
+                        <td>4 / 20</td>
+                        <td>1 / 20</td>
+                    </tr>
+                    <tr>
+                        <td>Time fee, 0.1 per frame</td>
+                        <td>195.8</td>
+                        <td>37 / 50</td>
+                        <td>4</td>
+                        <td>2</td>
+                    </tr>
+                    <tr>
+                        <td>Hackable bonus, +1 per frame</td>
+                        <td>-41.7</td>
+                        <td>0 / 50</td>
+                        <td>15</td>
+                        <td>32</td>
+                    </tr>
+                    <tr>
+                        <td>Improvement-based fix</td>
+                        <td>178.1</td>
+                        <td>29 / 50</td>
+                        <td>5</td>
+                        <td>2</td>
+                    </tr>
+                </table>
+            </div>
+        </div>
+    </section>
+
+    <section id="demos">
+        <div class="wrap">
+            <h2>Demos</h2>
+            <p class="narrow">Recorded from the trained model. Put the clips in the <code>videos</code> folder next to
+                this page and rename them to match the file names below.</p>
+            <div class="vids">
+                <figure><video controls loop muted playsinline preload="metadata"
+                        src="videos/baseline-episode-0.mp4"></video>
+                    <div class="missing">Clip not found: videos/baseline-episode-0.mp4</div>
+                    <figcaption>Trained landing<em>PPO baseline, 1M steps</em></figcaption>
+                </figure>
+                <figure><video controls loop muted playsinline preload="metadata" src="videos/random.mp4"></video>
+                    <div class="missing">Clip not found: videos/random.mp4</div>
+                    <figcaption>Random agent<em>Before training</em></figcaption>
+                </figure>
+                <figure><video controls loop muted playsinline preload="metadata" src="videos/hover.mp4"></video>
+                    <div class="missing">Clip not found: videos/hover.mp4</div>
+                    <figcaption>Reward hacking<em>The rocket hovers to farm points</em></figcaption>
+                </figure>
+                <figure><video controls loop muted playsinline preload="metadata" src="videos/fixed.mp4"></video>
+                    <div class="missing">Clip not found: videos/fixed.mp4</div>
+                    <figcaption>After the fix<em>Reward for improving, not surviving</em></figcaption>
+                </figure>
+            </div>
+        </div>
+    </section>
+
+    <section id="hacking">
+        <div class="wrap narrow">
+            <h2>Breaking it on purpose</h2>
+            <p>The experiment: add a rule of <strong>+1 for every frame the rocket stays upright and slow</strong>. It
+                sounds reasonable. An attempt is cut off at 1,000 frames, so a rocket that just hangs in the air can
+                collect up to 1,000 points from my rule while paying at most 300 in fuel. Landing ends the attempt and
+                the payments stop, so hovering beats landing, and the AI can learn exactly that.</p>
+            <p>This is called <strong>reward hacking</strong>: the AI optimizes the score I wrote, not the goal I meant.
+            </p>
+            <h3 style="margin-top:26px">The fix</h3>
+            <p>Pay for getting better (the change in position score between frames, like the built-in reward does)
+                instead of for sitting in a good spot, and add a small fee every frame so waiting costs something.</p>
+            <h3 style="margin-top:26px">What happened</h3>
+            <p>With the bonus, the real game score fell from 143 to -42. None of 50 test landings reached 200, and 32 of
+                50 episodes ran to the 1,000 frame limit without landing. The rocket had learned to earn my bonus
+                instead of landing. I always scored with my wrapper off, so the bonus could not flatter the result.</p>
+            <p>With the fix, hovering dropped back to 2 of 50 episodes and the score recovered to 178. The video clips
+                above show both behaviours.</p>
+            <pre><em># the fix: pay for improvement, plus a small time fee</em>
+new_phi = phi(obs)   <em># closer, slower, more upright = higher</em>
+reward += 5.0 * (0.99 * new_phi - prev_phi) - 0.1
+prev_phi = new_phi</pre>
+        </div>
+    </section>
+
+    <section id="notes">
+        <div class="wrap narrow">
+            <h2>Things that went wrong</h2>
+            <ul class="mess">
+                <li>The Box2D install failed until I installed <code>swig</code> first (<code>brew install swig</code>).
+                </li>
+                <li>Old tutorials use <code>LunarLander-v2</code>. The current library only has <code>v3</code>.</li>
+                <li>One training run proves nothing. Training is random, so a score within about 20 points of another is
+                    not a real difference.</li>
+                <li>The average score hid a split between clean landings and crashes. Per-episode results showed what
+                    the mean could not.</li>
+            </ul>
+            <h2 style="margin-top:44px">What I would do next</h2>
+            <ul class="mess">
+                <li>Run several seeds of each version and report the spread.</li>
+                <li>Tune the crash cases: train longer or adjust the learning rate.</li>
+                <li>Try a different reward bonus and see whether the AI finds another loophole.</li>
+            </ul>
+        </div>
+    </section>
+
+    <footer>
+        <div class="wrap">Built as a learning project. Source code: add your GitHub link here.</div>
+    </footer>
+
+    <script>
+        // Real results from evaluate_detail.py (baseline, 20 episodes)
+        const rewards = [-38.8, 247.1, 2.7, 134.6, 238.9, -23.4, 214.6, 213.0, 259.2, 182.5, 197.3, 210.3, -43.1, 272.8, 16.8, 214.8, -37.2, 237.8, -40.6, 198.3];
+        const bars = document.getElementById('bars');
+        const min = -60, max = 290, H = 240, zeroY = H * max / (max - min);
+        const z = document.createElement('div'); z.className = 'zero'; z.style.top = zeroY + 'px'; bars.appendChild(z);
+        rewards.forEach((r, i) => {
+            const b = document.createElement('div');
+            b.className = 'bar ' + (r < 0 ? 'bad' : r >= 180 ? 'ok' : 'mid');
+            b.tabIndex = 0;
+            const i2 = document.createElement('i');
+            const h = Math.abs(r) / (max - min) * H;
+            i2.style.height = h + 'px';
+            i2.style[r >= 0 ? 'bottom' : 'top'] = (r >= 0 ? (H - zeroY) : zeroY) + 'px';
+            if (r < 0) { i2.style.top = zeroY + 'px'; i2.style.bottom = 'auto' }
+            const t = document.createElement('span'); t.textContent = '#' + (i + 1) + ': ' + r.toFixed(0);
+            b.append(i2, t); bars.appendChild(b);
+        });
+        document.getElementById('avg').textContent = 'average ' + (rewards.reduce((a, c) => a + c, 0) / rewards.length).toFixed(1);
+        document.querySelectorAll('figure video').forEach(v => {
+            v.addEventListener('error', () => { v.style.display = 'none'; v.nextElementSibling.style.display = 'block' }, true);
+        });
+    </script>
+</body>
+
+</html>
