@@ -1,5 +1,7 @@
 # Teaching a rocket to land with reward shaping
 
+**Live demo:** https://karlsequeira20.github.io/LunarLander/
+
 Trained a PPO agent (Stable-Baselines3, Gymnasium LunarLander-v3), then
 wrote custom reward wrappers, deliberately caused reward hacking, and fixed it.
 
